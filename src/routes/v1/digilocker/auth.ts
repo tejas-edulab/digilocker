@@ -5,11 +5,14 @@ import querystring from 'querystring';
 import axios from 'axios';
 import * as dotenv from 'dotenv';
 import { createHash } from 'crypto';
+import * as fs from 'fs';
 import logger from '../../../utils/winston';
 import ApiError from '../../../utils/api-error';
 
 const router = Router();
 dotenv.config();
+
+let accessToken = ''; // Dummy token for testing
 
 function base64UrlEncodeWithoutPadding(arg: Buffer): string {
   let encoded = Buffer.from(arg).toString('base64');
@@ -35,6 +38,13 @@ function generateRandomString(length: number): string {
   return randomString;
 }
 
+function base64SaveImage(base64String: string, filePath: string) {
+  const base64Data = base64String.replace(/^data:image\/\w+;base64,/, '');
+  const buffer = Buffer.from(base64Data, 'base64');
+  fs.writeFileSync(filePath, buffer);
+}
+
+// Generate a code verifier
 const codeVerifier = generateRandomString(43);
 
 router.get('/login', async (req: Request, res: Response, next: NextFunction) => {
@@ -86,7 +96,182 @@ router.get('/callback', async (req: Request, res: Response, next: NextFunction) 
     };
 
     const response = await axios.request(axioxTokenConfig);
+
+    console.log('Response', response);
+
+    accessToken = response.data.access_token;
+
+    console.log('Access Token', accessToken);
     return res.status(200).json({ status: 200, data: response.data });
+  } catch (e) {
+    logger.error(e);
+    return next(e);
+  }
+});
+
+router.get('/profile', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!accessToken) return next(ApiError.unAuthorized());
+
+    console.log('Access Token', accessToken);
+
+    const axioxProfileConfig = {
+      method: 'get',
+      maxBodyLength: Infinity,
+      url: 'https://digilocker.meripehchaan.gov.in/public/oauth2/2/user',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    };
+
+    const response = await axios.request(axioxProfileConfig);
+    console.log('Response', response);
+
+    if (response.data && response.data.picture) {
+      console.log('Saving image');
+      base64SaveImage(response.data.picture, `${response.data.digilockerid}.jpeg`);
+    }
+    return res.status(200).json({ status: 200, data: response.data });
+  } catch (e) {
+    logger.error(e);
+    return next(e);
+  }
+});
+
+router.get('/list-issued-files', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!accessToken) return next(ApiError.unAuthorized());
+
+    console.log('Access Token', accessToken);
+
+    const axioxListFilesConfig = {
+      method: 'get',
+      maxBodyLength: Infinity,
+      url: 'https://api.digitallocker.gov.in/public/oauth2/2/files/issued',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    };
+
+    const response = await axios.request(axioxListFilesConfig);
+    console.log('Response', response);
+
+    return res.status(200).json({ status: 200, data: response.data });
+  } catch (e) {
+    logger.error(e);
+    return next(e);
+  }
+});
+
+router.get('/download-file/:fileId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!accessToken) return next(ApiError.unAuthorized());
+
+    const { fileId } = req.params;
+    if (!fileId) return next(ApiError.badRequest());
+
+    console.log('Access Token', accessToken);
+
+    const axioxDownloadFileConfig = {
+      method: 'get',
+      maxBodyLength: Infinity,
+      url: `https://api.digitallocker.gov.in/public/oauth2/1/file/${fileId}`,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      responseType: 'arraybuffer' as const,
+    };
+
+    const response = await axios.request(axioxDownloadFileConfig);
+    console.log('Response', response);
+
+    res.setHeader('Content-Disposition', `attachment; filename=${fileId}.pdf`);
+    res.setHeader('Content-Type', 'application/pdf');
+
+    // Save Pdf file locally
+    fs.writeFileSync(`${fileId}.pdf`, response.data);
+
+    return res.status(200).send(response.data);
+  } catch (e) {
+    logger.error(e);
+    return next(e);
+  }
+});
+
+router.get('/certificate-xml/:fileId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!accessToken) return next(ApiError.unAuthorized());
+
+    const { fileId } = req.params;
+    if (!fileId) return next(ApiError.badRequest());
+
+    console.log('Access Token', accessToken);
+
+    const axioxCertificateXmlConfig = {
+      method: 'get',
+      maxBodyLength: Infinity,
+      url: `https://api.digitallocker.gov.in/public/oauth2/1/xml/${fileId}`,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    };
+
+    const response = await axios.request(axioxCertificateXmlConfig);
+    console.log('Response', response);
+
+    return res.status(200).json({ status: 200, data: response.data });
+  } catch (e) {
+    logger.error(e);
+    return next(e);
+  }
+});
+
+router.get('/aadhar-card-xml', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!accessToken) return next(ApiError.unAuthorized());
+
+    console.log('Access Token', accessToken);
+
+    const axioxAadharCardConfig = {
+      method: 'get',
+      maxBodyLength: Infinity,
+      url: 'https://api.digitallocker.gov.in/public/oauth2/1/xml/eaadhaar',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    };
+
+    const response = await axios.request(axioxAadharCardConfig);
+    console.log('Response', response);
+
+    res.set('Content-Type', 'application/xml');
+    res.send(response.data);
+  } catch (e) {
+    logger.error(e);
+    return next(e);
+  }
+});
+
+router.get('/aapar-xml', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!accessToken) return next(ApiError.unAuthorized());
+
+    console.log('Access Token', accessToken);
+
+    const axioxAaparConfig = {
+      method: 'get',
+      maxBodyLength: Infinity,
+      url: 'https://api.digitallocker.gov.in/public/oauth2/3/xml/aapar',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    };
+
+    const response = await axios.request(axioxAaparConfig);
+    console.log('Response', response);
+
+    res.set('Content-Type', 'application/xml');
+    res.send(response.data);
   } catch (e) {
     logger.error(e);
     return next(e);
